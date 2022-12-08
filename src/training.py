@@ -1,42 +1,69 @@
 import gym
-import pybullet, pybullet_envs
-import torch as th
+import torch
+import numpy as np
+from ddpg_agent import Agent
+import matplotlib.pyplot as plt
 
-from stable_baselines3 import PPO
-from stable_baselines3.common.evaluation import evaluate_policy
+env = gym.make('BipedalWalkerHardcore-v2')
+
+state_dim = env.observation_space.shape[0]
+action_dim = env.action_space.shape[0]
+
+agent = Agent(state_size=state_dim, action_size=action_dim, random_seed=0)
 
 
-# Create environment
-# env = gym.make('LunarLanderContinuous-v2')
+def ddpg(episodes, step, pretrained, noise):
 
-env = gym.make('BipedalWalker-v3')
-# env.render(mode="human")
+    if pretrained:
+        agent.actor_local.load_state_dict(torch.load('1checkpoint_actor.pth', map_location="cpu"))
+        agent.critic_local.load_state_dict(torch.load('1checkpoint_critic.pth', map_location="cpu"))
+        agent.actor_target.load_state_dict(torch.load('1checkpoint_actor.pth', map_location="cpu"))
+        agent.critic_target.load_state_dict(torch.load('1checkpoint_critic.pth', map_location="cpu"))
 
-policy_kwargs = dict(activation_fn=th.nn.LeakyReLU, net_arch=[512, 512])
-# Instantiate the agent
-model = PPO('MlpPolicy', env,learning_rate=0.0003,policy_kwargs=policy_kwargs, verbose=1)
-# Train the agent
-for i in range(8000):
-    print("Training itteration ",i)
-    model.learn(total_timesteps=10000)
-    # Save the agent
-    model.save("ppo_Ant")
-    mean_reward, std_reward = evaluate_policy(model, model.get_env(), n_eval_episodes=5)
-    print("mean_reward ", mean_reward)
-    if mean_reward >= 270:
-        print("***Agent Trained with average reward ", mean_reward)
-        break
+    reward_list = []
 
-del model  # delete trained model to demonstrate loading
-# Load the trained agent
-# model = PPO.load("ppo_Ant")
+    for i in range(episodes):
 
-# Evaluate the agent
-# mean_reward, std_reward = evaluate_policy(model, model.get_env(), n_eval_episodes=10)
+        state = env.reset()
+        score = 0
 
-# Enjoy trained agent
-# obs = env.reset()
-# for i in range(100):
-#     action, _states = model.predict(obs, deterministic=True)
-#     obs, rewards, dones, info = env.step(action)
-#     env.render()
+        for t in range(step):
+
+            env.render()
+
+            action = agent.act(state, noise)
+            next_state, reward, done, info = env.step(action[0])
+            # agent.step(state, action, reward, next_state, done)
+            state = next_state.squeeze()
+            score += reward
+
+            if done:
+                print('Reward: {} | Episode: {}/{}'.format(score, i, episodes))
+                break
+
+        reward_list.append(score)
+
+        if score >= 270:
+            print('Task Solved')
+            torch.save(agent.actor_local.state_dict(), 'checkpoint_actor.pth')
+            torch.save(agent.critic_local.state_dict(), 'checkpoint_critic.pth')
+            torch.save(agent.actor_target.state_dict(), 'checkpoint_actor_t.pth')
+            torch.save(agent.critic_target.state_dict(), 'checkpoint_critic_t.pth')
+            break
+
+    torch.save(agent.actor_local.state_dict(), 'checkpoint_actor.pth')
+    torch.save(agent.critic_local.state_dict(), 'checkpoint_critic.pth')
+    torch.save(agent.actor_target.state_dict(), 'checkpoint_actor_t.pth')
+    torch.save(agent.critic_target.state_dict(), 'checkpoint_critic_t.pth')
+
+    print('Training saved')
+    return reward_list
+
+
+scores = ddpg(episodes=100, step=2000, pretrained=1, noise=0)
+
+fig = plt.figure()
+plt.plot(np.arange(1, len(scores) + 1), scores)
+plt.ylabel('Score')
+plt.xlabel('Episode #')
+plt.show()
